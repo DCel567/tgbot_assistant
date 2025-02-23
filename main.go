@@ -4,106 +4,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
+	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	russian "github.com/kljensen/snowball/russian"
 )
 
+var cfg *BotConfig
+
+type BotConfig struct {
+	TokenFile     string `json:"token_file"`
+	StopWordsFile string `json:"stop_words_file"`
+	MessagesFile  string `json:"messages_file"`
+}
+
+func CreateConfig() *BotConfig {
+	return &BotConfig{
+		TokenFile:     "token.txt",
+		StopWordsFile: "stopwords-ru.json",
+		MessagesFile:  "messages.json",
+	}
+}
+
 var stopWords map[string]bool
-
-type Message struct {
-	Message string `json:"message"`
-}
-
-type MetaMessage struct {
-	Text     string          `json:"text"`
-	TagCloud map[string]bool `json:"tag_cloud"`
-}
-
-func getTagCloud(text string) []string {
-	var tags []string
-
-	for _, word := range strings.Split(text, " ") {
-		word = russian.Stem(word, true)
-		if !stopWords[word] {
-			tags = append(tags, word)
-		}
-	}
-
-	return tags
-}
-
-func findMessage(text string, mss []MetaMessage, n int) ([]string, bool) {
-	tags := getTagCloud(text)
-	bestMatch := make([]string, 0, n)
-	maxScore := 0
-
-	for _, mm := range mss {
-		key_score := 0
-		for _, tag := range tags {
-			if mm.TagCloud[tag] {
-				key_score++
-			}
-		}
-
-		if key_score == maxScore && key_score > 0 && len(bestMatch) < n {
-			bestMatch = append(bestMatch, mm.Text)
-		}
-
-		if key_score > maxScore {
-			bestMatch = make([]string, 0, n)
-			bestMatch = append(bestMatch, mm.Text)
-			maxScore = key_score
-		}
-
-	}
-
-	if maxScore > 0 {
-		return bestMatch, true
-	}
-
-	return bestMatch, false
-}
-
-func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, mss []MetaMessage, done chan bool) {
-	for {
-		select {
-		case <-done:
-			return
-		case update := <-update:
-			if update.Message == nil {
-				continue
-			}
-
-			fmt.Printf("[%s] %s\n", update.Message.From.UserName, update.Message.Text)
-
-			if update.Message.Text == "/start" {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Привет! Я ваш новый Telegram-бот.")
-				bot.Send(msg)
-				continue
-			}
-
-			if update.Message.Text == "/help" {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Я могу помочь вам с основными вопросами! Напишите /start для начала.")
-				bot.Send(msg)
-				continue
-			}
-
-			if responds, ok := findMessage(update.Message.Text, mss, 1); ok {
-				for _, r := range responds {
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, r)
-					bot.Send(msg)
-				}
-				continue
-			} else {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "404")
-				bot.Send(msg)
-				continue
-			}
-		}
-	}
-}
 
 func readStopWords(filepath string) error {
 	stopWords = make(map[string]bool)
@@ -122,33 +45,9 @@ func readStopWords(filepath string) error {
 	return nil
 }
 
-func readMessages(filepath string) ([]MetaMessage, error) {
-	text, err := os.ReadFile(filepath)
-	if err != nil {
-		return nil, err
-	}
-
-	var mss []Message
-	err = json.Unmarshal(text, &mss)
-	if err != nil {
-		return nil, err
-	}
-
-	allMessages := make([]MetaMessage, len(mss))
-
-	for i, m := range mss {
-		tags := getTagCloud(m.Message)
-		allMessages[i] = MetaMessage{Text: m.Message, TagCloud: make(map[string]bool)}
-		for _, tag := range tags {
-			allMessages[i].TagCloud[tag] = true
-		}
-	}
-
-	return allMessages, nil
-}
-
 func main() {
-	token, err := os.ReadFile("token.txt")
+	cfg = CreateConfig()
+	token, err := os.ReadFile(cfg.TokenFile)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -157,23 +56,20 @@ func main() {
 	bot, err := tgbotapi.NewBotAPI(string(token))
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates, _ := bot.GetUpdatesChan(u)
 
-	filepath := "messages.json"
-	allMessages, err := readMessages(filepath)
+	allMessages, err := ScanMessages(cfg.MessagesFile)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	fmt.Println(allMessages)
-
-	filepath = "stopwords-ru.json"
-	err = readStopWords(filepath)
+	err = readStopWords(cfg.StopWordsFile)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -181,5 +77,22 @@ func main() {
 
 	fmt.Println("bot started")
 
-	handleInput(updates, bot, allMessages, make(chan bool))
+	stopBot := make(chan bool, 1)
+
+	numThreads := 10
+	threads := sync.WaitGroup{}
+	threads.Add(numThreads)
+
+	for i := 0; i < numThreads; i++ {
+		go func() {
+			defer threads.Done()
+			handleInput(updates, bot, &allMessages, stopBot)
+		}()
+	}
+
+	go updateMessages(&allMessages)
+
+	time.Sleep(time.Minute * 10)
+
+	// stopBot <- true
 }
