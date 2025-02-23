@@ -34,9 +34,9 @@ func getTagCloud(text string) []string {
 	return tags
 }
 
-func findMessage(text string, mss []MetaMessage, n int) (string, bool) {
+func findMessage(text string, mss []MetaMessage, n int) ([]string, bool) {
 	tags := getTagCloud(text)
-	bestMatch := ""
+	bestMatch := make([]string, 0, n)
 	maxScore := 0
 
 	for _, mm := range mss {
@@ -47,10 +47,16 @@ func findMessage(text string, mss []MetaMessage, n int) (string, bool) {
 			}
 		}
 
+		if key_score == maxScore && key_score > 0 && len(bestMatch) < n {
+			bestMatch = append(bestMatch, mm.Text)
+		}
+
 		if key_score > maxScore {
-			bestMatch = mm.Text
+			bestMatch = make([]string, 0, n)
+			bestMatch = append(bestMatch, mm.Text)
 			maxScore = key_score
 		}
+
 	}
 
 	if maxScore > 0 {
@@ -75,19 +81,25 @@ func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, mss []Met
 			if update.Message.Text == "/start" {
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Привет! Я ваш новый Telegram-бот.")
 				bot.Send(msg)
+				continue
 			}
 
 			if update.Message.Text == "/help" {
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Я могу помочь вам с основными вопросами! Напишите /start для начала.")
 				bot.Send(msg)
+				continue
 			}
 
-			if respond, ok := findMessage(update.Message.Text, mss, 1); ok {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, respond)
-				bot.Send(msg)
+			if responds, ok := findMessage(update.Message.Text, mss, 1); ok {
+				for _, r := range responds {
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, r)
+					bot.Send(msg)
+				}
+				continue
 			} else {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Подходящих записей не найдено.")
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "404")
 				bot.Send(msg)
+				continue
 			}
 		}
 	}
