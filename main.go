@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	russian "github.com/kljensen/snowball/russian"
 )
 
 var stopWords map[string]bool
@@ -21,11 +22,10 @@ type MetaMessage struct {
 }
 
 func getTagCloud(text string) []string {
-	text = strings.ToLower(text)
-
 	var tags []string
 
 	for _, word := range strings.Split(text, " ") {
+		word = russian.Stem(word, true)
 		if !stopWords[word] {
 			tags = append(tags, word)
 		}
@@ -157,6 +157,8 @@ func main() {
 		fmt.Println(err)
 		return
 	}
+
+	fmt.Println(allMessages)
 
 	filepath = "stopwords-ru.json"
 	err = readStopWords(filepath)
