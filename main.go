@@ -4,50 +4,135 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
-type Question struct {
-	Question string `json:"question"`
-	Answer   string `json:"answer"`
+var stopWords map[string]bool
+
+type Message struct {
+	Message string `json:"message"`
 }
 
-type Questions struct {
-	Questions []Question `json:"questions"`
+type MetaMessage struct {
+	Text     string          `json:"text"`
+	TagCloud map[string]bool `json:"tag_cloud"`
 }
 
-func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, qs map[string]string, done chan bool) {
+func getTagCloud(text string) []string {
+	text = strings.ToLower(text)
+
+	var tags []string
+
+	for _, word := range strings.Split(text, " ") {
+		if !stopWords[word] {
+			tags = append(tags, word)
+		}
+	}
+
+	return tags
+}
+
+func findMessage(text string, mss []MetaMessage, n int) (string, bool) {
+	tags := getTagCloud(text)
+	bestMatch := ""
+	maxScore := 0
+
+	for _, mm := range mss {
+		key_score := 0
+		for _, tag := range tags {
+			if mm.TagCloud[tag] {
+				key_score++
+			}
+		}
+
+		if key_score > maxScore {
+			bestMatch = mm.Text
+			maxScore = key_score
+		}
+	}
+
+	if maxScore > 0 {
+		return bestMatch, true
+	}
+
+	return bestMatch, false
+}
+
+func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, mss []MetaMessage, done chan bool) {
 	for {
 		select {
 		case <-done:
 			return
 		case update := <-update:
-			if update.Message == nil { // Игнорируем не сообщения
+			if update.Message == nil {
 				continue
 			}
 
-			// Выводим текст полученного сообщения
 			fmt.Printf("[%s] %s\n", update.Message.From.UserName, update.Message.Text)
 
-			// Ответ на команду /start
 			if update.Message.Text == "/start" {
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Привет! Я ваш новый Telegram-бот.")
 				bot.Send(msg)
 			}
 
-			if qs[update.Message.Text] != "" {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, qs[update.Message.Text])
-				bot.Send(msg)
-			}
-
-			// Ответ на команду /help
 			if update.Message.Text == "/help" {
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Я могу помочь вам с основными вопросами! Напишите /start для начала.")
 				bot.Send(msg)
 			}
+
+			if respond, ok := findMessage(update.Message.Text, mss, 1); ok {
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, respond)
+				bot.Send(msg)
+			} else {
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Подходящих записей не найдено.")
+				bot.Send(msg)
+			}
 		}
 	}
+}
+
+func readStopWords(filepath string) error {
+	stopWords = make(map[string]bool)
+	text, err := os.ReadFile(filepath)
+	if err != nil {
+		return err
+	}
+	var words []string
+	err = json.Unmarshal(text, &words)
+	if err != nil {
+		return err
+	}
+	for _, word := range words {
+		stopWords[word] = true
+	}
+	return nil
+}
+
+func readMessages(filepath string) ([]MetaMessage, error) {
+	text, err := os.ReadFile(filepath)
+	if err != nil {
+		return nil, err
+	}
+
+	var mss []Message
+	err = json.Unmarshal(text, &mss)
+	if err != nil {
+		return nil, err
+	}
+
+	allMessages := make([]MetaMessage, len(mss))
+
+	for i, m := range mss {
+		tags := getTagCloud(m.Message)
+		allMessages[i] = MetaMessage{Text: m.Message, TagCloud: make(map[string]bool)}
+		for _, tag := range tags {
+			allMessages[i].TagCloud[tag] = true
+		}
+	}
+
+	return allMessages, nil
 }
 
 func main() {
@@ -57,7 +142,6 @@ func main() {
 		return
 	}
 
-	fmt.Println(string(token))
 	bot, err := tgbotapi.NewBotAPI(string(token))
 	if err != nil {
 		fmt.Println(err)
@@ -67,24 +151,21 @@ func main() {
 	u.Timeout = 60
 	updates, _ := bot.GetUpdatesChan(u)
 
-	filepath := "questions.json"
-	text, err := os.ReadFile(filepath)
+	filepath := "messages.json"
+	allMessages, err := readMessages(filepath)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	qs := Questions{}
-	err = json.Unmarshal(text, &qs)
+	filepath = "stopwords-ru.json"
+	err = readStopWords(filepath)
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
 
-	questions := make(map[string]string)
+	fmt.Println("bot started")
 
-	for _, q := range qs.Questions {
-		questions[q.Question] = q.Answer
-	}
-
-	handleInput(updates, bot, questions, make(chan bool))
+	handleInput(updates, bot, allMessages, make(chan bool))
 }
