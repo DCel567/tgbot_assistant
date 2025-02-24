@@ -1,4 +1,4 @@
-module chat_assistent
+module chat_assistant
 
 go 1.24.0
 

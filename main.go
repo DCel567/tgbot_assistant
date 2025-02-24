@@ -92,7 +92,7 @@ func main() {
 
 	go updateMessages(&allMessages)
 
-	time.Sleep(time.Minute * 10)
+	time.Sleep(time.Hour * 10)
 
 	// stopBot <- true
 }

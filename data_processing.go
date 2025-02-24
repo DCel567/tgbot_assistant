@@ -18,6 +18,8 @@ type MetaMessage struct {
 }
 
 func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, mss *[]MetaMessage, done chan bool) {
+	messagesToShow := 3
+
 	for {
 		select {
 		case <-done:
@@ -45,11 +47,19 @@ func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, mss *[]Me
 			}
 
 			if len(update.Message.Text) > 5 && update.Message.Text[:4] == "/add" {
+
+				text := update.Message.Text[5:]
+				if len(getTagCloud(text)) == 0 {
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Заметка не создана, слишком неинформативно")
+					bot.Send(msg)
+					continue
+				}
+
 				jsonMutex := sync.Mutex{}
 				jsonMutex.Lock()
 				defer jsonMutex.Unlock()
 
-				AddMessageToJSON(update.Message.Text[5:])
+				AddMessageToJSON(text)
 
 				var err error
 				*mss, err = ScanMessages(cfg.MessagesFile)
@@ -63,7 +73,7 @@ func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, mss *[]Me
 				continue
 			}
 
-			if responds, ok := findMessage(update.Message.Text, *mss, 10); ok {
+			if responds, ok := findMessage(update.Message.Text, *mss, messagesToShow); ok {
 				for _, r := range responds {
 					msg := tgbotapi.NewMessage(update.Message.Chat.ID, r)
 					bot.Send(msg)
