@@ -44,12 +44,19 @@ func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, mss *[]Me
 				continue
 			}
 
-			if len(update.Message.Text) > 4 && update.Message.Text[:4] == "/add" {
+			if len(update.Message.Text) > 5 && update.Message.Text[:4] == "/add" {
 				jsonMutex := sync.Mutex{}
 				jsonMutex.Lock()
 				defer jsonMutex.Unlock()
 
 				AddMessageToJSON(update.Message.Text[5:])
+
+				var err error
+				*mss, err = ScanMessages(cfg.MessagesFile)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
 
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Заметка создана")
 				bot.Send(msg)
@@ -68,11 +75,11 @@ func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, mss *[]Me
 }
 
 func updateMessages(mss *[]MetaMessage) {
-	ticker := time.NewTicker(time.Second * 10)
+	ticker := time.NewTicker(time.Minute * 10)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		fmt.Println("updating messages")
+		fmt.Println("10 mins scan")
 		jsonMutex := sync.Mutex{}
 		jsonMutex.Lock()
 
