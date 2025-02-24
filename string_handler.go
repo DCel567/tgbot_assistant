@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	russian "github.com/kljensen/snowball/russian"
@@ -48,6 +49,7 @@ func getTagCloud(text string) []string {
 }
 
 func findMessage(text string, mss []MetaMessage, n int) ([]string, bool) {
+	text = removePunctuation(text)
 	tags := getTagCloud(text)
 	bestMatch := make([]string, 0, n)
 	maxScore := 0
@@ -77,6 +79,12 @@ func findMessage(text string, mss []MetaMessage, n int) ([]string, bool) {
 	}
 
 	return bestMatch, false
+}
+
+func removePunctuation(input string) string {
+	re := regexp.MustCompile(`[[:punct:]]`)
+	result := re.ReplaceAllString(input, "")
+	return result
 }
 
 func AddMessageToJSON(newMessage string) error {
