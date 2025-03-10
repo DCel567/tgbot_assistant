@@ -9,12 +9,19 @@ import (
 )
 
 type Message struct {
-	Message string `json:"message"`
+	Message string
 }
 
 type MetaMessage struct {
-	Text     string          `json:"text"`
-	TagCloud map[string]bool `json:"tag_cloud"`
+	Text     string
+	TagCloud map[string]bool
+}
+
+type Context struct {
+	Messages []MetaMessage
+	Chat     *tgbotapi.Chat
+	File     string
+	Updated  bool
 }
 
 func handleInput(update tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, mss *[]MetaMessage, done chan bool) {

@@ -11,6 +11,7 @@ import (
 )
 
 var cfg *BotConfig
+var stopWords map[string]bool
 
 type BotConfig struct {
 	TokenFile     string `json:"token_file"`
@@ -22,11 +23,27 @@ func CreateConfig() *BotConfig {
 	return &BotConfig{
 		TokenFile:     "token.txt",
 		StopWordsFile: "stopwords-ru.json",
-		MessagesFile:  "messages.json",
+		MessagesFile:  "chats/messages.json",
 	}
 }
 
-var stopWords map[string]bool
+func CreateEngine(cfg *BotConfig, msgs *[]MetaMessage) (*tgbotapi.BotAPI, error) {
+	token, err := os.ReadFile(cfg.TokenFile)
+	if err != nil {
+		return nil, err
+	}
+	bot, err := tgbotapi.NewBotAPI(string(token))
+	if err != nil {
+		return nil, err
+	}
+
+	*msgs, err = ScanMessages(cfg.MessagesFile)
+	if err != nil {
+		return nil, err
+	}
+
+	return bot, nil
+}
 
 func readStopWords(filepath string) error {
 	stopWords = make(map[string]bool)
@@ -47,13 +64,10 @@ func readStopWords(filepath string) error {
 
 func main() {
 	cfg = CreateConfig()
-	token, err := os.ReadFile(cfg.TokenFile)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
 
-	bot, err := tgbotapi.NewBotAPI(string(token))
+	allMessages := make([]MetaMessage, 0)
+
+	bot, err := CreateEngine(cfg, &allMessages)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -62,12 +76,6 @@ func main() {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates, _ := bot.GetUpdatesChan(u)
-
-	allMessages, err := ScanMessages(cfg.MessagesFile)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
 
 	err = readStopWords(cfg.StopWordsFile)
 	if err != nil {
@@ -83,16 +91,14 @@ func main() {
 	threads := sync.WaitGroup{}
 	threads.Add(numThreads)
 
-	for i := 0; i < numThreads; i++ {
+	go updateMessages(&allMessages)
+
+	for range numThreads {
 		go func() {
 			defer threads.Done()
 			handleInput(updates, bot, &allMessages, stopBot)
 		}()
 	}
 
-	go updateMessages(&allMessages)
-
 	time.Sleep(time.Hour * 10)
-
-	// stopBot <- true
 }
